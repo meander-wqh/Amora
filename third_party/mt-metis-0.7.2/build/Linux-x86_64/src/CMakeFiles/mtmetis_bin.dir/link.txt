@@ -1,0 +1,1 @@
+/usr/bin/cc  -fopenmp -std=c99 -O3 -DNDEBUG -rdynamic CMakeFiles/mtmetis_bin.dir/mtmetis_bin.c.o -o ../bin/mtmetis  -Wl,-rpath,/home/node10/yangxu/private_hnsw/third_party/mt-metis-0.7.2/build/Linux-x86_64/lib: ../lib/libmtmetis.a ../lib/libwildriver.so -lm 
