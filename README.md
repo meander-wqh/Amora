@@ -6,12 +6,23 @@ Communication-efficient private approximate nearest neighbors search (PANNS) via
 
 **Requirements:** C++17, OpenMP, CMake >= 3.10
 
+MT-METIS is used for multi-threaded graph partitioning and must be built first:
+
+```bash
+cd third_party/mt-metis-0.7.2 && ./configure && make -j16 && cd ../..
+```
+
+This produces `third_party/mt-metis-0.7.2/build/Linux-x86_64/lib/libmtmetis.a`, which
+the top-level CMake auto-detects. If it is absent, the build still succeeds but falls
+back to the built-in partitioner and emits a CMake warning — check for
+`-- MT-METIS enabled: ...` in the CMake output before reproducing reported results.
+
+hnswlib is header-only and needs no build step.
+
 ```bash
 mkdir -p build && cd build
 cmake .. && make -j16
 ```
-
-MT-METIS and hnswlib are included under `third_party/` and auto-detected.
 
 ## Usage
 
@@ -74,7 +85,7 @@ OMP_NUM_THREADS=16 ./build/private_search_v2 \
 ## Project Structure
 
 ```
-private_hnsw/
+Amora/
 ├── include/                            # Headers
 │   ├── private_hnsw_v2.h              # Private search core + type aliases
 │   ├── hnsw_quantized.h               # Quantized HNSW index
@@ -102,6 +113,11 @@ private_hnsw/
 ├── examples/                           # Executables
 │   ├── build_index_quantized.cpp      # Index construction
 │   └── private_search_v2.cpp          # Private search
+├── download_data_scripts/              # Dataset download and preparation
+│   ├── download_sift1M.sh             # SIFT1M / 10M / 50M
+│   ├── download_deep1M.sh             # DEEP1M
+│   ├── download_msmarco.sh            # MS MARCO
+│   └── prepare_msmarco.py             # MS MARCO embedding extraction
 ├── third_party/                        # Dependencies
 │   ├── mt-metis-0.7.2/               # Multi-threaded METIS
 │   └── hnswlib/                       # HNSW library (header-only)
