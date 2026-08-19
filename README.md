@@ -68,9 +68,7 @@ Ablation flags (combinable, e.g. `rounds_6,no_batch`):
 | `no_batch` | Disable batch PIR |
 | `no_prune` | Disable centroid-based pruning |
 | `no_topcand` | Disable TopCand exploration |
-| `centroid_entry_K` | Override entry partition count (e.g. `centroid_entry_3`) |
-| `rounds_N` | Override search iterations (e.g. `rounds_6`) |
-| `stale_N` | Early stop after N stale rounds (`stale_0` disables) |
+| `rounds_N` | Override search iterations (e.g. `rounds_3`) |
 
 Example:
 
