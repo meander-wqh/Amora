@@ -47,7 +47,7 @@ OMP_NUM_THREADS=16 ./build/private_search_v2 <index> <queries> <groundtruth> <st
 |-----------|-------------|---------|
 | `nq` | Number of queries | All |
 | `k` | Number of nearest neighbors | 10 |
-| `ef` | Search beam width | 50 |
+| `ef` | Result-heap Size | 50 |
 | `ablation` | Ablation flags (comma-separated) | None |
 
 Ablation flags (combinable, e.g. `rounds_6,no_batch`):
