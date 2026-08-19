@@ -138,13 +138,11 @@ void printUsage(const char* prog) {
     std::cout << "  output_file        : Output file for statistics" << std::endl;
     std::cout << "  nq                 : Number of queries (default: all)" << std::endl;
     std::cout << "  k                  : Number of neighbors (default: 10)" << std::endl;
-    std::cout << "  ef                 : Search beam width (default: 50)" << std::endl;
+    std::cout << "  ef                 : Result-heap size (default: 50)" << std::endl;
     std::cout << "  ablation           : Ablation flags (comma-separated, default: none):" << std::endl;
     std::cout << "                       no_prune          - disable centroid pruning" << std::endl;
     std::cout << "                       no_topcand        - disable topCand (set to 0)" << std::endl;
     std::cout << "                       no_batch          - disable batch PIR" << std::endl;
-    std::cout << "                       centroid_entry_K  - set entry clusters to K" << std::endl;
-    std::cout << "                       stale_N           - early stop after N stale rounds" << std::endl;
     std::cout << "                       rounds_N          - set fixed search iterations to N" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:" << std::endl;
