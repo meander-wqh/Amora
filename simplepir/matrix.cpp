@@ -2,10 +2,6 @@
 #include <stdexcept>
 namespace simplepir {
 
-// ============================================
-// MatrixT template implementations
-// ============================================
-
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> MatrixT<ElemType>::zeros(uint64_t r, uint64_t c) {
     auto m = std::make_shared<MatrixT<ElemType>>(r, c);
@@ -151,10 +147,6 @@ void MatrixT<ElemType>::print() const {
     }
 }
 
-// ============================================
-// Matrix multiplication (templated)
-// ============================================
-
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> matrixMul(const MatrixT<ElemType>& a, const MatrixT<ElemType>& b) {
     if (b.cols == 1) return matrixMulVec(a, b);
@@ -183,7 +175,6 @@ std::shared_ptr<MatrixT<ElemType>> matrixMulVec(const std::shared_ptr<MatrixT<El
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> matrixMulVecPacked(const MatrixT<ElemType>& a, const MatrixT<ElemType>& b, uint64_t basis, uint64_t compression) {
     auto out = std::make_shared<MatrixT<ElemType>>(a.rows + 8, 1);
-    // For now, use non-packed version for 64-bit
     if constexpr (sizeof(ElemType) == 4) {
         matMulVecPacked32(out->data.data(), a.data.data(), b.data.data(), a.rows, a.cols);
     } else {
@@ -213,10 +204,6 @@ std::shared_ptr<MatrixT<ElemType>> unsquishMatrix(const std::shared_ptr<MatrixT<
     return result;
 }
 
-// ============================================
-// Explicit template instantiations
-// ============================================
-
 template class MatrixT<Elem32>;
 template class MatrixT<Elem64>;
 
@@ -244,4 +231,4 @@ template std::shared_ptr<MatrixT<Elem64>> squishMatrix(const std::shared_ptr<Mat
 template std::shared_ptr<MatrixT<Elem32>> unsquishMatrix(const std::shared_ptr<MatrixT<Elem32>>&, uint64_t, uint64_t);
 template std::shared_ptr<MatrixT<Elem64>> unsquishMatrix(const std::shared_ptr<MatrixT<Elem64>>&, uint64_t, uint64_t);
 
-} // namespace simplepir
+}

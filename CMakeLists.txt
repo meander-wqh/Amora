@@ -5,9 +5,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -fopenmp")
 
-# =============================================================================
-# SimplePIR 库 (精简版，移除 database.cpp)
-# =============================================================================
 add_library(simplepir STATIC
     simplepir/pir_types.cpp
     simplepir/pir_math.cpp
@@ -24,9 +21,6 @@ target_include_directories(simplepir PUBLIC
 
 target_link_libraries(simplepir PUBLIC pthread gomp)
 
-# =============================================================================
-# 图分区库
-# =============================================================================
 add_library(graph_partitioner STATIC
     src/graph_partitioner.cpp
 )
@@ -37,9 +31,6 @@ target_include_directories(graph_partitioner PUBLIC
 
 target_link_libraries(graph_partitioner PUBLIC pthread gomp)
 
-# =============================================================================
-# 聚类策略库
-# =============================================================================
 add_library(clustering STATIC
     src/clustering/clustering.cpp
 )
@@ -51,7 +42,6 @@ target_include_directories(clustering PUBLIC
 
 target_link_libraries(clustering PUBLIC pthread gomp graph_partitioner)
 
-# MT-METIS 加速图分区
 option(USE_MTMETIS "Use MT-METIS for multi-threaded graph partitioning" ON)
 if(USE_MTMETIS)
     set(MTMETIS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mt-metis-0.7.2)
@@ -66,9 +56,6 @@ if(USE_MTMETIS)
     endif()
 endif()
 
-# =============================================================================
-# 子组管理库
-# =============================================================================
 add_library(subgroup STATIC
     src/subgroup/subgroup_manager.cpp
 )
@@ -81,9 +68,6 @@ target_include_directories(subgroup PUBLIC
 
 target_link_libraries(subgroup PUBLIC pthread gomp)
 
-# =============================================================================
-# HNSW Quantized 库
-# =============================================================================
 add_library(hnsw_quantized STATIC
     src/hnsw_quantized.cpp
     src/io.cpp
@@ -97,7 +81,6 @@ target_include_directories(hnsw_quantized PUBLIC
 
 target_link_libraries(hnsw_quantized PUBLIC pthread gomp graph_partitioner clustering subgroup)
 
-# hnswlib 加速图构建（header-only）
 option(USE_HNSWLIB "Use hnswlib for fast graph building" ON)
 if(USE_HNSWLIB)
     set(HNSWLIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/hnswlib)
@@ -110,9 +93,6 @@ if(USE_HNSWLIB)
     endif()
 endif()
 
-# =============================================================================
-# HNSW Private V2 库 (精简版，移除 pir_wrapper 依赖)
-# =============================================================================
 add_library(hnsw_private_v2 STATIC
     src/private_hnsw_v2.cpp
 )
@@ -126,14 +106,8 @@ target_include_directories(hnsw_private_v2 PUBLIC
 
 target_link_libraries(hnsw_private_v2 PUBLIC hnsw_quantized simplepir)
 
-# =============================================================================
-# 可执行程序
-# =============================================================================
-
-# 量化索引构建
 add_executable(build_index_quantized examples/build_index_quantized.cpp)
 target_link_libraries(build_index_quantized hnsw_quantized)
 
-# 隐私保护搜索 V2
 add_executable(private_search_v2 examples/private_search_v2.cpp)
 target_link_libraries(private_search_v2 hnsw_private_v2)

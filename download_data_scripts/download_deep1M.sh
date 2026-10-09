@@ -1,16 +1,4 @@
 #!/bin/bash
-# ============================================================
-# download_deep1M.sh
-# 下载 Deep1M (96维 CNN 深度特征) 数据集
-# 来源: Yandex Deep-1B benchmark (via ann-benchmarks)
-#
-# 输出文件:
-#   deep1m_base.fvecs        — 1,000,000 x 96 基础向量
-#   deep1m_query.fvecs       — 10,000 x 96 查询向量
-#   deep1m_groundtruth.ivecs — 10,000 x 100 真实最近邻 (L2)
-#
-# 依赖: wget, python3, numpy, h5py
-# ============================================================
 
 DATA_DIR="../data/Deep1M"
 HDF5_URL="http://ann-benchmarks.com/deep-image-96-angular.hdf5"
@@ -27,18 +15,12 @@ echo "============================================="
 echo "  Deep1M (96-dim, L2) Dataset Downloader"
 echo "============================================="
 
-# ----------------------------------------------------------
-# 0. 依赖检查
-# ----------------------------------------------------------
 echo "[0/4] 检查依赖..."
 python3 -c "import numpy; import h5py" 2>/dev/null || {
     echo "  缺少 Python 依赖，正在安装 numpy 和 h5py..."
     pip install numpy h5py --break-system-packages -q
 }
 
-# ===========================================================
-# 1. 下载 HDF5
-# ===========================================================
 if [ -f "deep1m_base.fvecs" ] && [ -f "deep1m_query.fvecs" ] && [ -f "deep1m_groundtruth.ivecs" ]; then
     echo "[1/4] 所有输出文件已存在，跳过下载"
 elif [ -f "$HDF5_FILE" ]; then
@@ -56,9 +38,6 @@ else
     echo "  下载完成"
 fi
 
-# ===========================================================
-# 2. HDF5 → fvecs/ivecs
-# ===========================================================
 if [ -f "deep1m_base.fvecs" ] && [ -f "deep1m_query.fvecs" ] && [ -f "deep1m_groundtruth.ivecs" ]; then
     echo "[2/4] 所有输出文件已存在，跳过处理"
 else
@@ -93,19 +72,15 @@ def write_ivecs(filename, data):
             f.write(data[i].tobytes())
     print(f"  写入 {filename}: {n} x {k}")
 
-# ---- 加载 HDF5 ----
 print("  加载 HDF5 文件...")
 with h5py.File("deep-image-96-angular.hdf5", 'r') as f:
     print(f"  HDF5 keys: {list(f.keys())}")
 
-    # train = base vectors, test = query vectors
     train = np.array(f['train'], dtype=np.float32)
     test  = np.array(f['test'],  dtype=np.float32)
     print(f"  train (base):  {train.shape}")
     print(f"  test  (query): {test.shape}")
 
-    # neighbors 和 distances 是基于 angular 距离的 ground truth
-    # 我们需要用 L2 重新计算 ground truth
     if 'neighbors' in f:
         ann_neighbors = np.array(f['neighbors'], dtype=np.int32)
         print(f"  neighbors:     {ann_neighbors.shape}")
@@ -113,7 +88,6 @@ with h5py.File("deep-image-96-angular.hdf5", 'r') as f:
         ann_distances = np.array(f['distances'], dtype=np.float32)
         print(f"  distances:     {ann_distances.shape}")
 
-# ---- 截取数据 ----
 if train.shape[0] >= NUM_BASE:
     base_vectors = train[:NUM_BASE]
 else:
@@ -129,13 +103,10 @@ else:
 
 print(f"  使用 base: {base_vectors.shape}, query: {query_vectors.shape}")
 
-# ---- 写入 fvecs ----
 print("  转换为 fvecs 格式...")
 write_fvecs("deep1m_base.fvecs", base_vectors)
 write_fvecs("deep1m_query.fvecs", query_vectors)
 
-# ---- 计算 L2 Ground Truth ----
-# ann-benchmarks 的 deep-image-96 用 angular 距离，我们需要 L2
 print(f"  计算 L2 ground truth (k={K_GT})...")
 
 gt_indices = np.zeros((NUM_QUERY, K_GT), dtype=np.int32)
@@ -143,21 +114,17 @@ gt_indices = np.zeros((NUM_QUERY, K_GT), dtype=np.int32)
 BATCH = 1000
 for start in range(0, NUM_QUERY, BATCH):
     end = min(start + BATCH, NUM_QUERY)
-    q_batch = query_vectors[start:end]  # [batch, dim]
+    q_batch = query_vectors[start:end]
 
-    # 分块计算 L2 距离，避免内存爆炸
     CHUNK = 200000
     l2_dist = np.zeros((end - start, NUM_BASE), dtype=np.float32)
     for c_start in range(0, NUM_BASE, CHUNK):
         c_end = min(c_start + CHUNK, NUM_BASE)
-        # ||q - b||^2 = ||q||^2 + ||b||^2 - 2*q·b
         diff = q_batch[:, np.newaxis, :] - base_vectors[np.newaxis, c_start:c_end, :]
         l2_dist[:, c_start:c_end] = np.sum(diff ** 2, axis=2)
 
-    # 取 top-K 最近邻
     gt_indices[start:end] = np.argpartition(l2_dist, K_GT, axis=1)[:, :K_GT]
 
-    # 对 top-K 内部排序
     for i in range(end - start):
         topk_idx = gt_indices[start + i]
         sorted_order = np.argsort(l2_dist[i, topk_idx])
@@ -170,9 +137,6 @@ print("\n  处理完成!")
 PYEOF
 fi
 
-# ===========================================================
-# 3. 清理
-# ===========================================================
 if [ -f "deep1m_base.fvecs" ] && [ -f "deep1m_query.fvecs" ] && [ -f "deep1m_groundtruth.ivecs" ]; then
     if [ -f "$HDF5_FILE" ]; then
         echo "[3/4] 清理中间文件..."
@@ -191,9 +155,6 @@ else
     echo "[3/4] 跳过清理 (输出文件不完整，请保留 HDF5 以便重试)"
 fi
 
-# ===========================================================
-# 4. 验证
-# ===========================================================
 echo "[4/4] 验证文件..."
 echo "---------------------------------------------"
 

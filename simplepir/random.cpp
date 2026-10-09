@@ -89,12 +89,10 @@ void setGlobalPRG(const PRGKey& key) {
     globalPRGInstance = std::make_unique<BufPRGReader>(std::make_shared<PRGReader>(key));
 }
 
-// 使用线程局部 PRG 避免锁竞争
 thread_local std::unique_ptr<BufPRGReader> threadLocalPRG;
 
 BufPRGReader& getThreadLocalPRG() {
     if (!threadLocalPRG) {
-        // 每个线程创建独立的 PRG
         threadLocalPRG = std::make_unique<BufPRGReader>();
     }
     return *threadLocalPRG;
@@ -108,4 +106,4 @@ int64_t gaussSample() {
     return GaussSampler::sample(getThreadLocalPRG());
 }
 
-} // namespace simplepir
+}

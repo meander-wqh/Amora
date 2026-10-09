@@ -1,6 +1,6 @@
 # Amora
 
-Communication-efficient private approximate nearest neighbors search (PANNS) via amortized PIR.
+Communication-efficient private approximate nearest neighbors search.
 
 ## Build
 
@@ -97,7 +97,7 @@ Amora/
 │   ├── hnsw_quantized.cpp             # Index build and serialization
 │   ├── io.cpp                         # Vector file I/O
 │   ├── graph_partitioner.cpp          # METIS graph partitioning
-│   ├── subgroup/subgroup_manager.cpp  # Subgroup and BFS renumbering
+│   ├── subgroup/subgroup_manager.cpp  # Subgroup
 │   └── clustering/clustering.cpp      # Clustering algorithms
 ├── simplepir/                          # PIR protocol layer
 │   ├── embedding_pir.h/cpp            # VecPIR (templatized)

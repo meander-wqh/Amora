@@ -49,5 +49,5 @@ void setGlobalPRG(const PRGKey& key);
 uint64_t randInt(uint64_t mod);
 int64_t gaussSample();
 
-} // namespace simplepir
-#endif // PIR_RANDOM_H
+}
+#endif

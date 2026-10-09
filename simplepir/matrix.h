@@ -7,10 +7,6 @@
 #include <algorithm>
 namespace simplepir {
 
-/**
- * @brief Templated Matrix class for PIR operations
- * @tparam ElemType Element type (Elem32 for 32-bit, Elem64 for 64-bit)
- */
 template<typename ElemType>
 class MatrixT {
 public:
@@ -59,7 +55,6 @@ public:
     void print() const;
 };
 
-// Matrix multiplication functions (templated)
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> matrixMul(const MatrixT<ElemType>& a, const MatrixT<ElemType>& b);
 
@@ -78,18 +73,14 @@ std::shared_ptr<MatrixT<ElemType>> matrixMulVecPacked(const MatrixT<ElemType>& a
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> matrixMulVecPacked(const std::shared_ptr<MatrixT<ElemType>>& a, const std::shared_ptr<MatrixT<ElemType>>& b, uint64_t basis, uint64_t compression);
 
-// Squish/Unsquish helper functions
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> squishMatrix(const std::shared_ptr<MatrixT<ElemType>>& m, uint64_t basis, uint64_t delta);
 
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> unsquishMatrix(const std::shared_ptr<MatrixT<ElemType>>& m, uint64_t basis, uint64_t delta);
 
-// Note: Matrix and Matrix64 type aliases are defined in pir_types.h
-
-// Explicit template instantiation declarations
 extern template class MatrixT<Elem32>;
 extern template class MatrixT<Elem64>;
 
-} // namespace simplepir
-#endif // PIR_MATRIX_H
+}
+#endif

@@ -1,10 +1,3 @@
-/**
- * @file simple_pir.cpp
- * @brief SimplePIR 安全版本实现
- *
- * 每次query都生成新的secret s，避免复用s导致的隐私泄露。
- */
-
 #include "simple_pir.h"
 #include <iostream>
 #include <stdexcept>
@@ -14,10 +7,6 @@
 #endif
 
 namespace simplepir {
-
-// ============================================================================
-// SimplePIRServer Implementation
-// ============================================================================
 
 std::shared_ptr<Matrix> SimplePIRServer::setup(
     const std::shared_ptr<Matrix>& database,
@@ -32,8 +21,6 @@ std::shared_ptr<Matrix> SimplePIRServer::setup(
     params_ = params;
     sharedMatrix_ = sharedMatrix;
 
-    // Compute hint: H = DB × A
-    // Uses matrix.h wrapper → pir_math OpenMP + AVX2
     hint_ = matrixMul(database_, sharedMatrix);
 
     isReady_ = true;
@@ -50,14 +37,8 @@ std::shared_ptr<Matrix> SimplePIRServer::answer(
         throw std::invalid_argument("Query vector cannot be null");
     }
 
-    // ans = DB × query
-    // Uses matrix.h wrapper → pir_math OpenMP + AVX2
     return matrixMulVec(database_, queryVector);
 }
-
-// ============================================================================
-// SimplePIRClient Implementation
-// ============================================================================
 
 void SimplePIRClient::init(
     const Params& params,
@@ -83,21 +64,15 @@ std::pair<std::shared_ptr<Matrix>, SimpleQueryContext> SimplePIRClient::query(ui
         throw std::out_of_range("Target column out of range");
     }
 
-    // 【安全关键】每次查询生成新的 secret s
-    // 这避免了服务器通过计算 qu_1 - qu_2 推断查询目标的攻击
     auto secret = Matrix::random(params_.N, 1, params_.Logq, 0);
 
-    // 计算 Hs = H × s (L × 1)，保存到 QueryContext 用于 recover
     auto Hs = matrixMulVec(hint_, secret);
 
-    // 计算 query = A × s (M × 1)
     auto queryVec = matrixMulVec(sharedMatrix_, secret);
 
-    // Add Gaussian noise
     auto noise = Matrix::gaussian(params_.M, 1);
     queryVec->matrixAdd(*noise);
 
-    // Add delta at target column
     uint64_t delta = params_.delta();
     uint64_t currentVal = queryVec->get(targetCol, 0);
     queryVec->set(targetCol, 0, currentVal + delta);
@@ -129,7 +104,6 @@ std::vector<uint64_t> SimplePIRClient::recover(
     const Elem* ansData = answer->data.data();
     const Elem* hsData = ctx.Hs->data.data();
 
-    // OpenMP parallelized recovery
     #ifdef _OPENMP
     #pragma omp parallel for schedule(static)
     #endif
@@ -137,7 +111,6 @@ std::vector<uint64_t> SimplePIRClient::recover(
         uint64_t ansVal = ansData[i];
         uint64_t hsVal = hsData[i];
 
-        // Compute difference (modular arithmetic)
         uint64_t diff;
         if (ansVal >= hsVal) {
             diff = ansVal - hsVal;
@@ -145,8 +118,6 @@ std::vector<uint64_t> SimplePIRClient::recover(
             diff = q_mod - (hsVal - ansVal);
         }
 
-        // Use signed interpretation for values near 0
-        // If diff > Q/2, it wrapped around (original value was near 0)
         int64_t signedDiff;
         if (diff > q_mod / 2) {
             signedDiff = static_cast<int64_t>(diff) - static_cast<int64_t>(q_mod);
@@ -154,10 +125,8 @@ std::vector<uint64_t> SimplePIRClient::recover(
             signedDiff = static_cast<int64_t>(diff);
         }
 
-        // Round to recover original value
         int64_t rounded = (signedDiff + static_cast<int64_t>(halfDelta)) / static_cast<int64_t>(delta);
 
-        // Clamp to valid range [0, P-1]
         if (rounded < 0) rounded = 0;
         if (rounded >= static_cast<int64_t>(P)) rounded = P - 1;
 
@@ -167,4 +136,4 @@ std::vector<uint64_t> SimplePIRClient::recover(
     return result;
 }
 
-} // namespace simplepir
+}

@@ -21,7 +21,6 @@ import struct
 import numpy as np
 from pathlib import Path
 
-
 def load_collection(collection_path):
     """加载 MS-MARCO collection.tsv"""
     print(f"Loading collection from {collection_path}...")
@@ -35,7 +34,6 @@ def load_collection(collection_path):
                 passages[pid] = text
     print(f"  Loaded {len(passages)} passages")
     return passages
-
 
 def load_queries(queries_path):
     """加载 MS-MARCO queries.dev.small.tsv"""
@@ -51,7 +49,6 @@ def load_queries(queries_path):
     print(f"  Loaded {len(queries)} queries")
     return queries
 
-
 def encode_texts(model, texts, batch_size=512, desc="Encoding"):
     """分批编码文本为向量"""
     from tqdm import tqdm
@@ -60,11 +57,10 @@ def encode_texts(model, texts, batch_size=512, desc="Encoding"):
     for i in tqdm(range(0, len(texts), batch_size), desc=desc):
         batch = texts[i:i + batch_size]
         embeddings = model.encode(batch, show_progress_bar=False,
-                                  normalize_embeddings=True)  # L2 归一化
+                                  normalize_embeddings=True)
         all_embeddings.append(embeddings)
 
     return np.vstack(all_embeddings).astype(np.float32)
-
 
 def write_fvecs(filename, vectors):
     """写入 .fvecs 格式（每个向量前写 int32 维度头）"""
@@ -75,7 +71,6 @@ def write_fvecs(filename, vectors):
         for i in range(n):
             f.write(struct.pack('i', d))
             f.write(vectors[i].tobytes())
-
 
 def write_ivecs(filename, indices):
     """写入 .ivecs 格式（每行前写 int32 个数头）"""
@@ -88,7 +83,6 @@ def write_ivecs(filename, indices):
             f.write(struct.pack('i', k))
             f.write(indices[i].tobytes())
 
-
 def compute_ground_truth(base_vectors, query_vectors, top_k=100):
     """用 FAISS 暴力内积搜索计算 ground truth"""
     import faiss
@@ -97,13 +91,12 @@ def compute_ground_truth(base_vectors, query_vectors, top_k=100):
     nq = query_vectors.shape[0]
     print(f"Computing ground truth: {nq} queries against {n} vectors, top-{top_k}...")
 
-    index = faiss.IndexFlatIP(d)  # 内积（归一化后 = cosine）
+    index = faiss.IndexFlatIP(d)
     index.add(base_vectors)
 
     distances, indices = index.search(query_vectors, top_k)
     print(f"  Done. Result shape: {indices.shape}")
     return indices
-
 
 def main():
     parser = argparse.ArgumentParser(description="Prepare MS-MARCO data for private HNSW")
@@ -122,7 +115,6 @@ def main():
 
     data_dir = Path(args.data_dir)
 
-    # 检查原始数据
     collection_path = data_dir / 'collection.tsv'
     queries_path = data_dir / 'queries.dev.small.tsv'
     if not collection_path.exists():
@@ -132,16 +124,12 @@ def main():
         print(f"Error: {queries_path} not found. Run download_msmarco.sh first.")
         return
 
-    # 输出文件路径
     base_npy = data_dir / 'msmarco_base.npy'
     query_npy = data_dir / 'msmarco_query.npy'
     base_fvecs = data_dir / 'msmarco_base.fvecs'
     query_fvecs = data_dir / 'msmarco_query.fvecs'
     gt_ivecs = data_dir / 'msmarco_groundtruth.ivecs'
 
-    # ========================================
-    # 1. 编码 passages
-    # ========================================
     if base_npy.exists():
         print(f"Loading cached passage embeddings from {base_npy}...")
         base_vectors = np.load(base_npy)
@@ -151,14 +139,12 @@ def main():
 
         passages = load_collection(collection_path)
 
-        # 按 pid 排序，保持一致的顺序
         sorted_pids = sorted(passages.keys())
         if args.max_passages > 0:
             sorted_pids = sorted_pids[:args.max_passages]
             print(f"  Using first {len(sorted_pids)} passages (--max_passages={args.max_passages})")
         passage_texts = [passages[pid] for pid in sorted_pids]
 
-        # 保存 pid 映射（pid → index）
         pid_map_path = data_dir / 'pid_to_index.tsv'
         print(f"Saving pid mapping to {pid_map_path}...")
         with open(pid_map_path, 'w') as f:
@@ -176,9 +162,6 @@ def main():
         print(f"Saving to {base_npy}...")
         np.save(base_npy, base_vectors)
 
-    # ========================================
-    # 2. 编码 queries
-    # ========================================
     if query_npy.exists():
         print(f"Loading cached query embeddings from {query_npy}...")
         query_vectors = np.load(query_npy)
@@ -190,14 +173,12 @@ def main():
         sorted_qids = sorted(queries.keys())
         query_texts = [queries[qid] for qid in sorted_qids]
 
-        # 保存 qid 映射
         qid_map_path = data_dir / 'qid_to_index.tsv'
         print(f"Saving qid mapping to {qid_map_path}...")
         with open(qid_map_path, 'w') as f:
             for idx, qid in enumerate(sorted_qids):
                 f.write(f"{qid}\t{idx}\n")
 
-        # 如果模型未加载（passages 用了缓存），重新加载
         try:
             model
         except NameError:
@@ -212,9 +193,6 @@ def main():
         print(f"Saving to {query_npy}...")
         np.save(query_npy, query_vectors)
 
-    # ========================================
-    # 3. 写 fvecs 格式
-    # ========================================
     if not base_fvecs.exists():
         write_fvecs(str(base_fvecs), base_vectors)
     else:
@@ -225,24 +203,17 @@ def main():
     else:
         print(f"{query_fvecs} already exists, skipping.")
 
-    # ========================================
-    # 4. 计算 ground truth
-    # ========================================
     if not gt_ivecs.exists():
         gt_indices = compute_ground_truth(base_vectors, query_vectors, top_k=args.top_k)
         write_ivecs(str(gt_ivecs), gt_indices)
     else:
         print(f"{gt_ivecs} already exists, skipping.")
 
-    # ========================================
-    # 5. 数据统计
-    # ========================================
     print("\n=== Data Summary ===")
     print(f"Base vectors:  {base_vectors.shape[0]} x {base_vectors.shape[1]}")
     print(f"Query vectors: {query_vectors.shape[0]} x {query_vectors.shape[1]}")
     print(f"Value range:   [{base_vectors.min():.4f}, {base_vectors.max():.4f}]")
 
-    # 验证归一化
     norms = np.linalg.norm(base_vectors[:100], axis=1)
     print(f"L2 norms (first 100): mean={norms.mean():.4f}, std={norms.std():.6f}")
 
@@ -253,7 +224,6 @@ def main():
             print(f"  {f.name}: {size_mb:.1f} MB")
 
     print("\nDone!")
-
 
 if __name__ == '__main__':
     main()

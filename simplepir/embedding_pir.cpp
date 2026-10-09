@@ -1,8 +1,3 @@
-/**
- * @file embedding_pir.cpp
- * @brief Implementation of Embedding PIR protocol (templated)
- */
-
 #include "embedding_pir.h"
 #include "pir_math.h"
 #include <iostream>
@@ -18,10 +13,6 @@
 
 namespace simplepir {
 
-// ============================================================================
-// EmbeddingPIRConfig Implementation
-// ============================================================================
-
 void EmbeddingPIRConfig::print() const {
     std::cout << "=== Embedding PIR Configuration ===" << std::endl;
     std::cout << "Embedding dimension (d): " << embeddingDim << std::endl;
@@ -31,10 +22,6 @@ void EmbeddingPIRConfig::print() const {
     std::cout << "Result size:            " << resultSize() << std::endl;
     std::cout << "===================================" << std::endl;
 }
-
-// ============================================================================
-// EmbeddingPIRParams Implementation
-// ============================================================================
 
 void EmbeddingPIRParams::init(const EmbeddingPIRConfig& cfg,
                                uint64_t logQ, uint64_t lweN, double sigma,
@@ -49,10 +36,6 @@ void EmbeddingPIRParams::init(const EmbeddingPIRConfig& cfg,
     pirParams.P = P;
 }
 
-// ============================================================================
-// EmbeddingDatabaseT Implementation
-// ============================================================================
-
 template<typename ElemType>
 EmbeddingDatabaseT<ElemType>::EmbeddingDatabaseT(const EmbeddingPIRConfig& config)
     : config_(config), isInitialized_(true), hasData_(false), isFinalized_(false) {
@@ -66,7 +49,6 @@ EmbeddingDatabaseT<ElemType>::EmbeddingDatabaseT(const EmbeddingPIRConfig& confi
     uint64_t rows = config.maxClusterSize;
     uint64_t cols = config.numClusters * config.embeddingDim;
 
-    // Elem32 路径: 直接分配 uint8 存储，跳过 4 字节 MatrixT 中间层
     if constexpr (sizeof(ElemType) == 4) {
         dbRows_ = rows;
         dbCols_ = cols;
@@ -104,7 +86,6 @@ uint64_t EmbeddingDatabaseT<ElemType>::addEmbedding(uint64_t clusterId, const st
     uint64_t colOffset = clusterId * config_.embeddingDim;
 
     if constexpr (sizeof(ElemType) == 4) {
-        // Elem32 路径: 直接写 uint8
         for (uint64_t i = 0; i < config_.embeddingDim; ++i) {
             compressedData_[embIdx * dbCols_ + colOffset + i] = static_cast<uint8_t>(embedding[i]);
         }
@@ -133,7 +114,6 @@ void EmbeddingDatabaseT<ElemType>::addEmbeddingRaw(uint64_t clusterId, const uin
     uint64_t colOffset = clusterId * config_.embeddingDim;
 
     if constexpr (sizeof(ElemType) == 4) {
-        // Elem32 路径: 直接 memcpy uint8 数据
         std::memcpy(&compressedData_[embIdx * dbCols_ + colOffset], raw, dim);
     } else {
         for (int i = 0; i < dim; ++i) {
@@ -233,10 +213,6 @@ float EmbeddingDatabaseT<ElemType>::dequantizeValue(uint64_t val) const {
     return static_cast<float>(val) / 7.5f - 1.0f;
 }
 
-// ============================================================================
-// EmbeddingPIRServerT Implementation
-// ============================================================================
-
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> EmbeddingPIRServerT<ElemType>::setup(
     EmbeddingDatabaseT<ElemType>& db,
@@ -246,7 +222,6 @@ std::shared_ptr<MatrixT<ElemType>> EmbeddingPIRServerT<ElemType>::setup(
     params_ = params;
 
     if constexpr (sizeof(ElemType) == 4) {
-        // Elem32 路径: 直接从 Database 的 compressedData_ move 接管
         if (db.hasCompressedData()) {
             compressedDBRows_ = db.getDBRows();
             compressedDBCols_ = db.getDBCols();
@@ -256,7 +231,6 @@ std::shared_ptr<MatrixT<ElemType>> EmbeddingPIRServerT<ElemType>::setup(
             std::cout << "[EmbeddingPIRServer] DB direct uint8: " << std::fixed << std::setprecision(2)
                       << compMB << " MB (zero-copy from database)" << std::endl;
         } else {
-            // 回退: 从 MatrixT 压缩
             database_ = db.getMatrix();
             compressedDBRows_ = database_->rows;
             compressedDBCols_ = database_->cols;
@@ -268,13 +242,11 @@ std::shared_ptr<MatrixT<ElemType>> EmbeddingPIRServerT<ElemType>::setup(
             database_.reset();
         }
 
-        // 计算 hint = DB × A
         state_.hint = std::make_shared<MatrixT<ElemType>>(compressedDBRows_, sharedMatrix->cols);
         matMulCompressed8_32(state_.hint->data.data(), compressedDB_.data(),
                               sharedMatrix->data.data(),
                               compressedDBRows_, compressedDBCols_, sharedMatrix->cols, signedData_);
     } else {
-        // Elem64 路径: 原始 matmul
         database_ = db.getMatrix();
         compressedDBRows_ = database_->rows;
         compressedDBCols_ = database_->cols;
@@ -305,7 +277,6 @@ void EmbeddingPIRServerT<ElemType>::setupWithCache(
     state_.hint = cachedHint;
 
     if constexpr (sizeof(ElemType) == 4) {
-        // Elem32 路径: 直接 move 接管 uint8 数据
         if (db.hasCompressedData()) {
             compressedDBRows_ = db.getDBRows();
             compressedDBCols_ = db.getDBCols();
@@ -386,10 +357,6 @@ std::shared_ptr<MatrixT<ElemType>> EmbeddingPIRServerT<ElemType>::batchAnswer(
     }
 }
 
-// ============================================================================
-// EmbeddingPIRClientT Implementation
-// ============================================================================
-
 template<typename ElemType>
 void EmbeddingPIRClientT<ElemType>::init(
     const EmbeddingPIRParams& params,
@@ -436,20 +403,15 @@ EmbeddingPIRClientT<ElemType>::query(uint64_t clusterId, const std::vector<uint6
     uint64_t N = params_.pirParams.N;
     uint64_t queryDim = params_.config.queryDim();
 
-    // 每次查询生成新的 secret s
     auto secret = MatrixT<ElemType>::random(N, 1, params_.pirParams.Logq, 0);
 
-    // 计算 Hs = H × s
     auto Hs = matrixMulVec(hint_, secret);
 
-    // 计算 baseQuery = A × s
     auto queryVec = matrixMulVec(sharedMatrix_, secret);
 
-    // 添加高斯噪声
     auto noise = MatrixT<ElemType>::gaussian(queryDim, 1);
     queryVec->matrixAdd(*noise);
 
-    // 在目标聚类位置添加缩放的查询向量
     uint64_t delta = params_.delta();
     uint64_t colOffset = clusterId * params_.d();
 
@@ -532,10 +494,6 @@ std::vector<float> EmbeddingPIRClientT<ElemType>::recoverFloat(
     return floatResults;
 }
 
-// ============================================================================
-// EmbeddingPIRT Implementation
-// ============================================================================
-
 template<typename ElemType>
 EmbeddingPIRT<ElemType>::EmbeddingPIRT(const EmbeddingPIRConfig& config) : config_(config) {
     if (!config.isValid()) {
@@ -617,10 +575,6 @@ float EmbeddingPIRT<ElemType>::computeInnerProductFloat(
     return result;
 }
 
-// ============================================================================
-// 显式模板实例化
-// ============================================================================
-
 template struct QueryContextT<Elem32>;
 template struct QueryContextT<Elem64>;
 template struct QueryMsgT<Elem32>;
@@ -640,4 +594,4 @@ template class EmbeddingPIRClientT<Elem64>;
 template class EmbeddingPIRT<Elem32>;
 template class EmbeddingPIRT<Elem64>;
 
-} // namespace simplepir
+}

@@ -14,17 +14,14 @@
 #include "hnswlib/hnswlib.h"
 #endif
 
-// SIMD headers
 #if defined(__AVX2__)
 #include <immintrin.h>
 #elif defined(__SSE2__)
 #include <emmintrin.h>
-#include <pmmintrin.h>  // for _mm_hadd_ps
+#include <pmmintrin.h>
 #endif
 
 namespace hnsw {
-
-// ========== VisitedTable 实现 ==========
 
 VisitedTable::VisitedTable(int size) : visited(size, 0), visno(1), maxSize(size) {}
 
@@ -43,16 +40,12 @@ void VisitedTable::reset() {
     }
 }
 
-// ========== HNSWQuantizedIndex 构造函数 ==========
-
 HNSWQuantizedIndex::HNSWQuantizedIndex(int dim, int M, int efConstruction,
                                        const QuantizerConfig& cfg, DistanceType distanceType)
     : d(dim), M(M), M0(M * 2), efConstruction(efConstruction), efSearch(16),
       maxLevel(16), ntotal(0), levelMult(1.0f / std::log(M)),
       quantizer(dim, cfg), distType(distanceType),
       entryPoint(-1), currentMaxLevel(-1), rng(std::random_device{}()) {}
-
-// ========== 距离计算 ==========
 
 int64_t HNSWQuantizedIndex::computeDistance(int32_t id, const uint8_t* query) const {
     const uint8_t* vec = quantizedVectors.data() + (size_t)id * d;
@@ -70,7 +63,6 @@ int64_t HNSWQuantizedIndex::computeDistance(int32_t id, const uint8_t* query) co
             }
         }
     } else {
-        // signed量化：将uint8_t重新解释为int8_t
         const int8_t* svec = reinterpret_cast<const int8_t*>(vec);
         const int8_t* squery = reinterpret_cast<const int8_t*>(query);
         if (distType == DistanceType::L2) {
@@ -87,8 +79,6 @@ int64_t HNSWQuantizedIndex::computeDistance(int32_t id, const uint8_t* query) co
     return dist;
 }
 
-// ========== 随机层数 ==========
-
 int HNSWQuantizedIndex::randomLevel() {
     std::lock_guard<std::mutex> lock(rngMutex);
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
@@ -97,8 +87,6 @@ int HNSWQuantizedIndex::randomLevel() {
     return std::min(level, maxLevel - 1);
 }
 
-// ========== 贪婪搜索 ==========
-
 int32_t HNSWQuantizedIndex::greedySearch(const uint8_t* query, int32_t entry, int level) const {
     int32_t curr = entry;
     int64_t currDist = computeDistance(curr, query);
@@ -106,7 +94,6 @@ int32_t HNSWQuantizedIndex::greedySearch(const uint8_t* query, int32_t entry, in
     bool changed = true;
     while (changed) {
         changed = false;
-        // 边界检查
         if (curr < 0 || curr >= (int)neighbors.size()) break;
         if (level < 0 || level >= (int)neighbors[curr].size()) break;
         
@@ -124,9 +111,6 @@ int32_t HNSWQuantizedIndex::greedySearch(const uint8_t* query, int32_t entry, in
     return curr;
 }
 
-
-// ========== 层内搜索 ==========
-
 std::priority_queue<HNSWQuantizedIndex::NodeDist, std::vector<HNSWQuantizedIndex::NodeDist>, std::greater<HNSWQuantizedIndex::NodeDist>>
 HNSWQuantizedIndex::searchLayer(const uint8_t* query, int32_t entry, int ef, int level, VisitedTable& vt) const {
     std::priority_queue<NodeDist, std::vector<NodeDist>, std::greater<NodeDist>> candidates;
@@ -143,7 +127,6 @@ HNSWQuantizedIndex::searchLayer(const uint8_t* query, int32_t entry, int ef, int
         
         if (curr.distance > results.top().distance) break;
         
-        // 边界检查
         if (curr.id < 0 || curr.id >= (int)neighbors.size()) continue;
         if (level < 0 || level >= (int)neighbors[curr.id].size()) continue;
         
@@ -161,7 +144,6 @@ HNSWQuantizedIndex::searchLayer(const uint8_t* query, int32_t entry, int ef, int
         }
     }
     
-    // 转换为min heap返回
     std::priority_queue<NodeDist, std::vector<NodeDist>, std::greater<NodeDist>> ret;
     while (!results.empty()) {
         ret.push(results.top());
@@ -169,16 +151,6 @@ HNSWQuantizedIndex::searchLayer(const uint8_t* query, int32_t entry, int ef, int
     }
     return ret;
 }
-
-
-
-
-
-
-
-
-
-// ========== 搜索 ==========
 
 std::vector<std::pair<int64_t, int32_t>> HNSWQuantizedIndex::search(const float* query, int k, int ef) const {
     if (ef < 0) ef = std::max(efSearch, k);
@@ -196,16 +168,13 @@ std::vector<std::pair<int64_t, int32_t>> HNSWQuantizedIndex::searchQuantized(con
     int32_t curr = entryPoint.load();
     int curMaxLevel = currentMaxLevel.load();
     
-    // 上层贪婪搜索
     for (int lev = curMaxLevel; lev > 0; --lev) {
         curr = greedySearch(query, curr, lev);
     }
     
-    // 底层beam search
     VisitedTable vt(ntotal.load());
     auto candidates = searchLayer(query, curr, ef, 0, vt);
     
-    // 取top-k
     std::vector<std::pair<int64_t, int32_t>> results;
     while (!candidates.empty() && (int)results.size() < k) {
         results.push_back({candidates.top().distance, candidates.top().id});
@@ -215,34 +184,25 @@ std::vector<std::pair<int64_t, int32_t>> HNSWQuantizedIndex::searchQuantized(con
     return results;
 }
 
-
-// ========== 聚类 ==========
-
 void HNSWQuantizedIndex::buildClustering(int nClusters, int numThreads) {
     int n = ntotal.load();
     if (n == 0) return;
 
     if (nClusters <= 0) {
-        // 默认: sqrt(N/d) 个聚类
         nClusters = std::max(1, (int)std::sqrt((double)n / d));
     }
 
     std::cout << "Building K-Means clustering with " << nClusters << " clusters for " << n << " vectors..." << std::endl;
 
-    // 使用新的聚类策略模块
     KMeansClustering strategy(20, numThreads);
     ClusteringResult result = strategy.cluster(*this, nClusters);
 
-    // 更新索引内部状态
     numClusters = result.numClusters;
     clusterAssignment = std::move(result.assignments);
     hasClustering = true;
 
-    // 打印统计信息
     result.print();
 }
-
-
 
 int HNSWQuantizedIndex::getClusterAssignment(int nodeId) const {
     if (!hasClustering || nodeId < 0 || nodeId >= (int)clusterAssignment.size()) {
@@ -251,19 +211,15 @@ int HNSWQuantizedIndex::getClusterAssignment(int nodeId) const {
     return clusterAssignment[nodeId];
 }
 
-// ========== 序列化 ==========
-
 void HNSWQuantizedIndex::save(const std::string& filename) const {
     std::ofstream ofs(filename, std::ios::binary);
     if (!ofs) throw std::runtime_error("Cannot open file for writing: " + filename);
     
-    // 写入魔数和版本
     const char magic[] = "HNSW_Q8";
-    int version = 4;  // v4: 增加子组信息
+    int version = 4;
     ofs.write(magic, 7);
     ofs.write(reinterpret_cast<const char*>(&version), sizeof(version));
 
-    // 写入基本参数
     int n = ntotal.load();
     int ep = entryPoint.load();
     int maxLev = currentMaxLevel.load();
@@ -278,16 +234,12 @@ void HNSWQuantizedIndex::save(const std::string& filename) const {
     ofs.write(reinterpret_cast<const char*>(&maxLev), sizeof(maxLev));
     ofs.write(reinterpret_cast<const char*>(&distTypeInt), sizeof(distTypeInt));
     
-    // 写入量化器参数
     quantizer.save(ofs);
     
-    // 写入量化向量
     ofs.write(reinterpret_cast<const char*>(quantizedVectors.data()), (size_t)n * d);
 
-    // 写入层数
     ofs.write(reinterpret_cast<const char*>(levels.data()), (size_t)n * sizeof(int));
     
-    // 写入邻居
     for (int i = 0; i < n; ++i) {
         int numLevels = neighbors[i].size();
         ofs.write(reinterpret_cast<const char*>(&numLevels), sizeof(numLevels));
@@ -300,14 +252,12 @@ void HNSWQuantizedIndex::save(const std::string& filename) const {
         }
     }
     
-    // 写入聚类信息
     ofs.write(reinterpret_cast<const char*>(&hasClustering), sizeof(hasClustering));
     if (hasClustering) {
         ofs.write(reinterpret_cast<const char*>(&numClusters), sizeof(numClusters));
         ofs.write(reinterpret_cast<const char*>(clusterAssignment.data()), (size_t)n * sizeof(int));
     }
 
-    // 写入子组信息（v4+）
     saveSubgroupInfo(ofs);
 }
 
@@ -315,7 +265,6 @@ void HNSWQuantizedIndex::load(const std::string& filename) {
     std::ifstream ifs(filename, std::ios::binary);
     if (!ifs) throw std::runtime_error("Cannot open file for reading: " + filename);
     
-    // 读取魔数和版本
     char magic[8] = {0};
     int version;
     ifs.read(magic, 7);
@@ -324,7 +273,6 @@ void HNSWQuantizedIndex::load(const std::string& filename) {
     }
     ifs.read(reinterpret_cast<char*>(&version), sizeof(version));
     
-    // 读取基本参数
     int n, ep, maxLev;
     ifs.read(reinterpret_cast<char*>(&d), sizeof(d));
     ifs.read(reinterpret_cast<char*>(&M), sizeof(M));
@@ -334,31 +282,25 @@ void HNSWQuantizedIndex::load(const std::string& filename) {
     ifs.read(reinterpret_cast<char*>(&ep), sizeof(ep));
     ifs.read(reinterpret_cast<char*>(&maxLev), sizeof(maxLev));
 
-    // v3: 读取 distType
     if (version >= 3) {
         int distTypeInt;
         ifs.read(reinterpret_cast<char*>(&distTypeInt), sizeof(distTypeInt));
         distType = static_cast<DistanceType>(distTypeInt);
     }
-    // v2 及更早版本：distType 保持构造时的值（不覆盖）
 
     ntotal.store(n);
     entryPoint.store(ep);
     currentMaxLevel.store(maxLev);
 
-    // 读取量化器参数
     quantizer = ScalarQuantizer(d);
     quantizer.load(ifs);
     
-    // 读取量化向量
     quantizedVectors.resize((size_t)n * d);
     ifs.read(reinterpret_cast<char*>(quantizedVectors.data()), (size_t)n * d);
 
-    // 读取层数
     levels.resize(n);
     ifs.read(reinterpret_cast<char*>(levels.data()), (size_t)n * sizeof(int));
     
-    // 读取邻居
     neighbors.resize(n);
     for (int i = 0; i < n; ++i) {
         int numLevels;
@@ -374,7 +316,6 @@ void HNSWQuantizedIndex::load(const std::string& filename) {
         }
     }
     
-    // 读取聚类信息（版本2+）
     if (version >= 2) {
         ifs.read(reinterpret_cast<char*>(&hasClustering), sizeof(hasClustering));
         if (hasClustering) {
@@ -384,37 +325,29 @@ void HNSWQuantizedIndex::load(const std::string& filename) {
         }
     }
 
-    // 读取子组信息（版本4+）
     if (version >= 4) {
         loadSubgroupInfo(ifs);
     }
 }
-
-
-// ========== 图分区聚类 ==========
 
 void HNSWQuantizedIndex::buildGraphPartitionClustering(int nClusters, double imbalance) {
     int n = ntotal.load();
     if (n == 0) return;
 
     if (nClusters <= 0) {
-        // 默认: sqrt(N/d) 个聚类 (与K-Means一致，基于EmbeddingPIR维度优化)
         nClusters = std::max(1, (int)std::sqrt((double)n / d));
     }
 
     std::cout << "Building graph partition clustering with " << nClusters
               << " clusters for " << n << " vectors..." << std::endl;
 
-    // 使用新的聚类策略模块
     GraphPartitionClustering strategy(imbalance);
     ClusteringResult result = strategy.cluster(*this, nClusters);
 
-    // 更新索引内部状态
     numClusters = result.numClusters;
     clusterAssignment = std::move(result.assignments);
     hasClustering = true;
 
-    // 打印统计信息
     result.print();
 }
 
@@ -428,7 +361,6 @@ HNSWQuantizedIndex::ClusteringStats HNSWQuantizedIndex::analyzeCurrentClustering
     int n = ntotal.load();
     stats.numClusters = numClusters;
 
-    // Compute cluster sizes
     std::vector<int> clusterSizes(numClusters, 0);
     for (int i = 0; i < n; i++) {
         int c = clusterAssignment[i];
@@ -442,7 +374,6 @@ HNSWQuantizedIndex::ClusteringStats HNSWQuantizedIndex::analyzeCurrentClustering
     stats.avgClusterSize = static_cast<double>(n) / numClusters;
     stats.imbalance = (stats.maxClusterSize - stats.avgClusterSize) / stats.avgClusterSize;
 
-    // Compute neighbor clusters and edge cut
     double totalNeighborClusters = 0;
     int totalEdges = 0;
     int edgeCut = 0;
@@ -469,10 +400,6 @@ HNSWQuantizedIndex::ClusteringStats HNSWQuantizedIndex::analyzeCurrentClustering
     return stats;
 }
 
-// ============================================================================
-// 延迟量化模式：使用 Float 向量构建图
-// ============================================================================
-
 float HNSWQuantizedIndex::computeDistanceFloat(int32_t id, const float* query) const {
     const float* vec = floatVectors.data() + (size_t)id * d;
     float dist = 0;
@@ -483,7 +410,6 @@ float HNSWQuantizedIndex::computeDistanceFloat(int32_t id, const float* query) c
             dist += diff * diff;
         }
     } else {
-        // InnerProduct: 越大越好，取负数使其越小越好
         for (int i = 0; i < d; ++i) {
             dist -= vec[i] * query[i];
         }
@@ -563,7 +489,6 @@ std::vector<int32_t> HNSWQuantizedIndex::selectNeighborsFloat(
     std::priority_queue<NodeDistFloat, std::vector<NodeDistFloat>, std::greater<NodeDistFloat>>& candidates,
     int maxM) const {
 
-    // 首先保存所有候选者到向量中（与量化版本一致）
     std::vector<NodeDistFloat> sorted;
     while (!candidates.empty()) {
         sorted.push_back(candidates.top());
@@ -573,7 +498,6 @@ std::vector<int32_t> HNSWQuantizedIndex::selectNeighborsFloat(
     std::vector<int32_t> result;
     result.reserve(maxM);
 
-    // 启发式邻居选择
     for (const auto& nd : sorted) {
         if ((int)result.size() >= maxM) break;
 
@@ -588,7 +512,6 @@ std::vector<int32_t> HNSWQuantizedIndex::selectNeighborsFloat(
         if (good) result.push_back(nd.id);
     }
 
-    // 如果启发式选择不够，补充最近的
     if ((int)result.size() < maxM) {
         for (const auto& nd : sorted) {
             if ((int)result.size() >= maxM) break;
@@ -601,9 +524,7 @@ std::vector<int32_t> HNSWQuantizedIndex::selectNeighborsFloat(
     return result;
 }
 
-
 void HNSWQuantizedIndex::addConnectionFloatThreadSafe(int32_t from, int32_t to, int level) {
-    // 边界检查：确保 from 节点有这一层
     if (from < 0 || from >= (int)neighbors.size()) return;
     if (level < 0 || level >= (int)neighbors[from].size()) return;
 
@@ -611,7 +532,6 @@ void HNSWQuantizedIndex::addConnectionFloatThreadSafe(int32_t from, int32_t to, 
     auto& fromNbrs = neighbors[from][level];
     int maxConn = (level == 0) ? M0 : M;
 
-    // 检查是否已经存在
     for (int32_t nbr : fromNbrs) {
         if (nbr == to) return;
     }
@@ -619,7 +539,6 @@ void HNSWQuantizedIndex::addConnectionFloatThreadSafe(int32_t from, int32_t to, 
     if ((int)fromNbrs.size() < maxConn) {
         fromNbrs.push_back(to);
     } else {
-        // 使用简单替换逻辑（线程安全版本避免复杂计算）
         const float* fromVec = floatVectors.data() + (size_t)from * d;
         int maxId = (int)(floatVectors.size() / d);
         if (from >= maxId || to >= maxId || to < 0) return;
@@ -698,22 +617,18 @@ void HNSWQuantizedIndex::addFloatParallel(const float* data, int n, int numThrea
     int startId = ntotal.load();
     useFloatBuild = true;
 
-    // 预分配空间
     floatVectors.resize((size_t)(startId + n) * d);
     neighbors.resize(startId + n);
     levels.resize(startId + n);
     nodeLocks = std::vector<std::mutex>(startId + n);
 
-    // 复制原始 float 向量（不量化）
     std::cout << "Copying " << n << " float vectors..." << std::endl;
     std::memcpy(floatVectors.data() + (size_t)startId * d, data, (size_t)n * d * sizeof(float));
 
-    // 训练量化器（为后续 finalizeQuantization 做准备）
     if (startId == 0 && n > 0) {
         quantizer.train(data, n);
     }
 
-    // 预先计算所有层数
     std::cout << "Generating levels..." << std::endl;
     for (int i = 0; i < n; ++i) {
         int id = startId + i;
@@ -722,7 +637,6 @@ void HNSWQuantizedIndex::addFloatParallel(const float* data, int n, int numThrea
         neighbors[id].resize(level + 1);
     }
 
-    // 第一个向量单独处理
     if (startId == 0) {
         entryPoint.store(0);
         currentMaxLevel.store(levels[0]);
@@ -730,7 +644,6 @@ void HNSWQuantizedIndex::addFloatParallel(const float* data, int n, int numThrea
 
     ntotal.store(startId + n);
 
-    // 批量并行插入
     std::cout << "Building index with " << numThreads << " threads (float mode)..." << std::endl;
     auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -775,7 +688,6 @@ void HNSWQuantizedIndex::addFloatParallelMove(std::vector<float>&& data, int n, 
 
     int startId = ntotal.load();
     if (startId != 0) {
-        // 非首次添加，回退到拷贝方式
         addFloatParallel(data.data(), n, numThreads);
         return;
     }
@@ -791,19 +703,16 @@ void HNSWQuantizedIndex::addFloatParallelMove(std::vector<float>&& data, int n, 
 
     useFloatBuild = true;
 
-    // 直接接管输入 vector，零拷贝
     floatVectors = std::move(data);
-    floatVectors.resize((size_t)n * d);  // 确保大小正确
+    floatVectors.resize((size_t)n * d);
     neighbors.resize(n);
     levels.resize(n);
     nodeLocks = std::vector<std::mutex>(n);
 
     std::cout << "Zero-copy: moved " << n << " float vectors directly." << std::endl;
 
-    // 训练量化器
     quantizer.train(floatVectors.data(), n);
 
-    // 预先计算所有层数
     std::cout << "Generating levels..." << std::endl;
     for (int i = 0; i < n; ++i) {
         int level = randomLevel();
@@ -815,7 +724,6 @@ void HNSWQuantizedIndex::addFloatParallelMove(std::vector<float>&& data, int n, 
     currentMaxLevel.store(levels[0]);
     ntotal.store(n);
 
-    // 批量并行插入
     std::cout << "Building index with " << numThreads << " threads (float mode)..." << std::endl;
     auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -863,13 +771,10 @@ void HNSWQuantizedIndex::finalizeQuantization() {
     int n = ntotal.load();
     std::cout << "Finalizing quantization for " << n << " vectors..." << std::endl;
 
-    // 分配量化向量空间
     quantizedVectors.resize((size_t)n * d);
 
-    // 量化所有向量
     quantizer.quantize(floatVectors.data(), quantizedVectors.data(), n);
 
-    // 释放 float 向量内存
     floatVectors.clear();
     floatVectors.shrink_to_fit();
     useFloatBuild = false;
@@ -877,20 +782,14 @@ void HNSWQuantizedIndex::finalizeQuantization() {
     std::cout << "Quantization complete. Float vectors released." << std::endl;
 }
 
-// ============================================================================
-// 子组相关方法实现
-// ============================================================================
-
 void HNSWQuantizedIndex::renumberNodesByCluster() {
     if (!hasClustering) {
         throw std::runtime_error("renumberNodesByCluster requires clustering data");
     }
 
-    // 使用 SubgroupManager 执行重编号
     SubgroupManager mgr;
     mgr.renumberNodesByCluster(*this, clusterAssignment, numClusters);
 
-    // Move 结果到内部数组，零拷贝
     nodeToNewId = mgr.moveNodeToNewId();
     newIdToNode = mgr.moveNewIdToNode();
     clusterOffset = mgr.moveClusterOffsets();
@@ -901,14 +800,11 @@ void HNSWQuantizedIndex::buildSubgroups(int targetSubgroupSize) {
         throw std::runtime_error("buildSubgroups requires clustering and node renumbering");
     }
 
-    // 使用已有的重编号数据初始化 SubgroupManager（避免重复 BFS）
     SubgroupManager mgr;
     mgr.setRenumberData(nodeToNewId, newIdToNode, clusterOffset, numClusters);
 
-    // 然后调用 buildSubgroups
     mgr.buildSubgroups(*this, clusterAssignment, targetSubgroupSize);
 
-    // Move 结果到内部数组，零拷贝
     maxSubgroupSize = mgr.getMaxSubgroupSize();
     numSubgroupsPerCluster = mgr.getTotalSubgroups() / numClusters;
     subgroupOffset = mgr.moveSubgroupOffsets();
@@ -922,60 +818,45 @@ void HNSWQuantizedIndex::buildNeighborInfo() {
         throw std::runtime_error("buildNeighborInfo requires subgroup data");
     }
 
-    // 使用 SubgroupManager 执行邻居信息构建
     SubgroupManager mgr;
     mgr.initFromExistingData(
         nodeToNewId, newIdToNode, clusterOffset, subgroupOffset,
         nodeSubgroup, nodeLocalIdxInSubgroup,
-        std::vector<hnsw::NodeNeighborInfo>(),  // 空邻居信息
+        std::vector<hnsw::NodeNeighborInfo>(),
         numClusters, maxSubgroupSize
     );
 
-    // 调用 SubgroupManager 的 buildNeighborInfo
     mgr.buildNeighborInfo(*this, clusterAssignment);
 
-    // 类型统一后直接 move，零拷贝
     nodeNeighborInfo = mgr.moveAllNeighborInfo();
 }
 
-
-
-
-
 void HNSWQuantizedIndex::saveSubgroupInfo(std::ofstream& ofs) const {
-    // 写入子组标志
     ofs.write(reinterpret_cast<const char*>(&hasSubgrouping), sizeof(hasSubgrouping));
 
     if (!hasSubgrouping) return;
 
-    // 写入子组参数
     ofs.write(reinterpret_cast<const char*>(&numSubgroupsPerCluster), sizeof(numSubgroupsPerCluster));
     ofs.write(reinterpret_cast<const char*>(&maxSubgroupSize), sizeof(maxSubgroupSize));
 
-    // 写入节点映射
     int n = ntotal.load();
     ofs.write(reinterpret_cast<const char*>(nodeToNewId.data()), (size_t)n * sizeof(int));
     ofs.write(reinterpret_cast<const char*>(newIdToNode.data()), (size_t)n * sizeof(int));
 
-    // 写入节点子组映射 (nodeSubgroup[newId] -> subgroupId)
     ofs.write(reinterpret_cast<const char*>(nodeSubgroup.data()), (size_t)n * sizeof(int));
 
-    // 写入节点在子组内的局部索引 (nodeLocalIdxInSubgroup[newId] -> posInSubgroup)
     ofs.write(reinterpret_cast<const char*>(nodeLocalIdxInSubgroup.data()), (size_t)n * sizeof(int));
 
-    // 写入聚类偏移
     int numOffsets = (int)clusterOffset.size();
     ofs.write(reinterpret_cast<const char*>(&numOffsets), sizeof(numOffsets));
     ofs.write(reinterpret_cast<const char*>(clusterOffset.data()), numOffsets * sizeof(int));
 
-    // 写入子组偏移
     for (int c = 0; c < numClusters; ++c) {
         int numSubOffsets = (int)subgroupOffset[c].size();
         ofs.write(reinterpret_cast<const char*>(&numSubOffsets), sizeof(numSubOffsets));
         ofs.write(reinterpret_cast<const char*>(subgroupOffset[c].data()), numSubOffsets * sizeof(int));
     }
 
-    // 写入邻居信息
     for (int i = 0; i < n; ++i) {
         int numGroups = (int)nodeNeighborInfo[i].groups.size();
         ofs.write(reinterpret_cast<const char*>(&numGroups), sizeof(numGroups));
@@ -995,38 +876,31 @@ void HNSWQuantizedIndex::saveSubgroupInfo(std::ofstream& ofs) const {
 }
 
 void HNSWQuantizedIndex::loadSubgroupInfo(std::ifstream& ifs) {
-    // 读取子组标志
     ifs.read(reinterpret_cast<char*>(&hasSubgrouping), sizeof(hasSubgrouping));
 
     if (!hasSubgrouping) return;
 
     int n = ntotal.load();
 
-    // 读取子组参数
     ifs.read(reinterpret_cast<char*>(&numSubgroupsPerCluster), sizeof(numSubgroupsPerCluster));
     ifs.read(reinterpret_cast<char*>(&maxSubgroupSize), sizeof(maxSubgroupSize));
 
-    // 读取节点映射
     nodeToNewId.resize(n);
     newIdToNode.resize(n);
     ifs.read(reinterpret_cast<char*>(nodeToNewId.data()), (size_t)n * sizeof(int));
     ifs.read(reinterpret_cast<char*>(newIdToNode.data()), (size_t)n * sizeof(int));
 
-    // 读取节点子组映射
     nodeSubgroup.resize(n);
     ifs.read(reinterpret_cast<char*>(nodeSubgroup.data()), (size_t)n * sizeof(int));
 
-    // 读取节点在子组内的局部索引
     nodeLocalIdxInSubgroup.resize(n);
     ifs.read(reinterpret_cast<char*>(nodeLocalIdxInSubgroup.data()), (size_t)n * sizeof(int));
 
-    // 读取聚类偏移
     int numOffsets;
     ifs.read(reinterpret_cast<char*>(&numOffsets), sizeof(numOffsets));
     clusterOffset.resize(numOffsets);
     ifs.read(reinterpret_cast<char*>(clusterOffset.data()), numOffsets * sizeof(int));
 
-    // 读取子组偏移
     subgroupOffset.resize(numClusters);
     for (int c = 0; c < numClusters; ++c) {
         int numSubOffsets;
@@ -1035,7 +909,6 @@ void HNSWQuantizedIndex::loadSubgroupInfo(std::ifstream& ifs) {
         ifs.read(reinterpret_cast<char*>(subgroupOffset[c].data()), numSubOffsets * sizeof(int));
     }
 
-    // 读取邻居信息
     nodeNeighborInfo.resize(n);
     for (int i = 0; i < n; ++i) {
         int numGroups;
@@ -1057,17 +930,13 @@ void HNSWQuantizedIndex::loadSubgroupInfo(std::ifstream& ifs) {
     std::cout << "Subgroup info loaded." << std::endl;
 }
 
-// ============================================================================
-// 获取 SubgroupManager（从现有数据构建）
-// ============================================================================
 SubgroupManager HNSWQuantizedIndex::getSubgroupManager() const {
     SubgroupManager mgr;
 
     if (!hasSubgrouping) {
-        return mgr;  // 返回空的 SubgroupManager
+        return mgr;
     }
 
-    // 类型统一后无需转换，直接传引用
     mgr.initFromExistingData(
         nodeToNewId,
         newIdToNode,
@@ -1090,7 +959,6 @@ SubgroupManager HNSWQuantizedIndex::moveToSubgroupManager() {
         return mgr;
     }
 
-    // Move 版本：零拷贝转移所有数据
     mgr.initFromExistingDataMove(
         std::move(nodeToNewId),
         std::move(newIdToNode),
@@ -1106,14 +974,9 @@ SubgroupManager HNSWQuantizedIndex::moveToSubgroupManager() {
     return mgr;
 }
 
-// ============================================================================
-// hnswlib 加速构建
-// ============================================================================
-
 #ifdef USE_HNSWLIB
 
 void HNSWQuantizedIndex::buildWithHnswlib(const float* data, int n, int numThreads) {
-    // 拷贝数据后调用 move 版本
     std::vector<float> dataCopy(data, data + (size_t)n * d);
     buildWithHnswlibMove(std::move(dataCopy), n, numThreads);
 }
@@ -1130,10 +993,8 @@ void HNSWQuantizedIndex::buildWithHnswlibMove(std::vector<float>&& data, int n, 
     numThreads = 1;
 #endif
 
-    // 1. 训练量化器
     quantizer.train(data.data(), n);
 
-    // 2. 创建 hnswlib 索引
     hnswlib::SpaceInterface<float>* space = nullptr;
     if (distType == DistanceType::L2) {
         space = new hnswlib::L2Space(d);
@@ -1146,7 +1007,6 @@ void HNSWQuantizedIndex::buildWithHnswlibMove(std::vector<float>&& data, int n, 
 
     hnswlib::HierarchicalNSW<float> hnsw(space, n, M, efConstruction);
 
-    // 3. 添加第一个点（单线程），其余并行
     auto startTime = std::chrono::high_resolution_clock::now();
 
     hnsw.addPoint(data.data(), 0);
@@ -1177,16 +1037,13 @@ void HNSWQuantizedIndex::buildWithHnswlibMove(std::vector<float>&& data, int n, 
               << std::fixed << std::setprecision(2) << buildTime << "s ("
               << n / buildTime << " vec/s)" << std::endl;
 
-    // 4. 提取图结构
     extractGraphFromHnswlib(&hnsw, n);
 
-    // 5. 构建 internal_id -> label 映射
     std::vector<int> internalToLabel(n);
     for (int i = 0; i < n; ++i) {
         internalToLabel[i] = static_cast<int>(hnsw.getExternalLabel(i));
     }
 
-    // 6. 从 hnswlib 内部存储量化（按 label 存放）
     std::cout << "Quantizing vectors from hnswlib internal storage..." << std::endl;
     quantizedVectors.resize((size_t)n * d);
 
@@ -1199,11 +1056,10 @@ void HNSWQuantizedIndex::buildWithHnswlibMove(std::vector<float>&& data, int n, 
         quantizer.quantize(vec, quantizedVectors.data() + (size_t)label * d, 1);
     }
 
-    // 7. 释放原始数据
     { std::vector<float>().swap(data); }
 
     ntotal.store(n);
-    useFloatBuild = false;  // 已完成量化
+    useFloatBuild = false;
 
     delete space;
 
@@ -1215,7 +1071,6 @@ void HNSWQuantizedIndex::extractGraphFromHnswlib(void* hnswPtr, int n) {
 
     std::cout << "Extracting graph structure from hnswlib..." << std::endl;
 
-    // 构建 internal_id -> label 映射（并行插入时 internal_id != label）
     std::vector<int> i2l(n);
     for (int i = 0; i < n; ++i) {
         i2l[i] = static_cast<int>(hnsw.getExternalLabel(i));
@@ -1225,7 +1080,6 @@ void HNSWQuantizedIndex::extractGraphFromHnswlib(void* hnswPtr, int n) {
     levels.resize(n);
     nodeLocks = std::vector<std::mutex>(n);
 
-    // entryPoint 和 maxLevel 需要映射到 label 空间
     entryPoint.store(i2l[hnsw.enterpoint_node_]);
     currentMaxLevel.store(hnsw.maxlevel_);
 
@@ -1235,7 +1089,6 @@ void HNSWQuantizedIndex::extractGraphFromHnswlib(void* hnswPtr, int n) {
         levels[label] = nodeLevel;
         neighbors[label].resize(nodeLevel + 1);
 
-        // Level-0: [count, neighbor0, neighbor1, ...]
         unsigned int* ll0 = (unsigned int*)hnsw.get_linklist0(i);
         unsigned int cnt0 = *ll0;
         neighbors[label][0].resize(cnt0);
@@ -1243,7 +1096,6 @@ void HNSWQuantizedIndex::extractGraphFromHnswlib(void* hnswPtr, int n) {
             neighbors[label][0][j] = i2l[*(ll0 + 1 + j)];
         }
 
-        // Higher levels
         for (int lev = 1; lev <= nodeLevel; ++lev) {
             unsigned int* ll = (unsigned int*)hnsw.get_linklist(i, lev);
             unsigned int cnt = *ll;
@@ -1258,6 +1110,6 @@ void HNSWQuantizedIndex::extractGraphFromHnswlib(void* hnswPtr, int n) {
               << ", entryPoint=" << entryPoint.load() << std::endl;
 }
 
-#endif // USE_HNSWLIB
+#endif
 
-} // namespace hnsw
+}

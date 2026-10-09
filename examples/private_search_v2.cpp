@@ -1,13 +1,3 @@
-/**
- * @file private_search_v2.cpp
- * @brief Privacy-preserving HNSW search demo with neighbor PIR
- *
- * This version retrieves neighbor information through PIR as well,
- * providing stronger privacy guarantees.
- *
- * Usage: ./private_search_v2 <index.hnsw_q8> <query.fvecs> <groundtruth.ivecs> <output_file> [nq] [k] [ef]
- */
-
 #include "../include/private_hnsw_v2.h"
 #include "io.h"
 #include <iostream>
@@ -22,9 +12,6 @@
 
 using namespace hnsw;
 
-// ============================================
-// Hint 缓存：保存/加载 PIR shared matrix 和 hint
-// ============================================
 template<typename ElemType>
 bool saveMatrix(const std::string& path, const std::shared_ptr<simplepir::MatrixT<ElemType>>& mat) {
     std::ofstream ofs(path, std::ios::binary);
@@ -79,13 +66,8 @@ bool loadPIRCache(const std::string& indexPath, PIRCache& cache) {
     return cache.embShared && cache.embHint && cache.nbrShared && cache.nbrHint;
 }
 
-// ============================================
-// Qrels 加载：MS-MARCO MRR@100 评估
-// ============================================
 struct QrelsData {
-    // qid → set of relevant pids
     std::map<int, std::set<int>> qrels;
-    // query index (in fvecs) → qid
     std::vector<int> indexToQid;
     bool isValid = false;
 };
@@ -93,7 +75,6 @@ struct QrelsData {
 QrelsData loadQrels(const std::string& dataDir) {
     QrelsData data;
 
-    // 加载 qrels
     std::string qrelsPath = dataDir + "/qrels.dev.small.tsv";
     std::ifstream qrelsFile(qrelsPath);
     if (!qrelsFile) return data;
@@ -108,8 +89,6 @@ QrelsData loadQrels(const std::string& dataDir) {
     }
     std::cout << "  Loaded " << data.qrels.size() << " qrels entries from " << qrelsPath << std::endl;
 
-    // 构建 query index → qid 映射
-    // queries.dev.small.tsv 中的 qid 按排序后编码到 fvecs
     std::string queriesPath = dataDir + "/queries.dev.small.tsv";
     std::ifstream queriesFile(queriesPath);
     if (!queriesFile) return data;
@@ -167,7 +146,6 @@ int main(int argc, char** argv) {
     int ef = (argc > 7) ? std::stoi(argv[7]) : 50;
     std::string ablation = (argc > 8) ? argv[8] : "";
 
-    // 消融实验配置（-1 表示未设置，使用 header 默认值）
     bool ablationDisablePrune = false;
     bool ablationDisableTopCand = false;
     bool ablationDisableBatch = false;
@@ -175,7 +153,6 @@ int main(int argc, char** argv) {
     int ablationMaxStaleRounds = -1;
     int ablationFixedIterations = -1;
 
-    // 支持逗号分隔的组合消融 flag，如 "no_batch,stale_1,rounds_6"
     auto parseOneFlag = [&](const std::string& flag) -> bool {
         if (flag == "no_prune") {
             ablationDisablePrune = true;
@@ -208,7 +185,6 @@ int main(int argc, char** argv) {
         std::cout << "Ablation: " << ablation << std::endl;
     }
 
-    // Open output file
     std::ofstream out(outputFile);
     if (!out.is_open()) {
         std::cerr << "Error: Cannot open output file: " << outputFile << std::endl;
@@ -225,9 +201,6 @@ int main(int argc, char** argv) {
     printBoth("  Private HNSW Search V2 (Neighbor PIR)\n");
     printBoth("========================================\n\n");
 
-    // ========================================
-    // Step 1: Load HNSW index
-    // ========================================
     printBoth("[Step 1] Loading HNSW index: " + indexPath + "\n");
 
     QuantizerConfig cfg;
@@ -236,7 +209,6 @@ int main(int argc, char** argv) {
     HNSWQuantizedIndex index(0, 16, 200, cfg, DistanceType::L2);
     index.load(indexPath);
 
-    // 从加载的索引中读取量化模式（isUnsigned 已从文件反序列化）
     std::cout << "Quantization mode: " << (index.quantizer.config.isUnsigned ? "unsigned" : "signed") << std::endl;
 
     if (!index.hasClusteringData()) {
@@ -261,9 +233,6 @@ int main(int argc, char** argv) {
 
     std::cout << std::endl;
 
-    // ========================================
-    // Step 2: Build Private HNSW server
-    // ========================================
     printBoth("[Step 2] Building Private HNSW V2 server...\n");
 
     auto buildStart = std::chrono::high_resolution_clock::now();
@@ -283,9 +252,6 @@ int main(int argc, char** argv) {
     out << "Max neighbors: " << config.maxNeighbors << std::endl;
     out << std::endl;
 
-    // ========================================
-    // Step 3: Setup PIR (对称接口，支持 hint 缓存)
-    // ========================================
     printBoth("[Step 3] Setting up PIR...\n");
 
     auto pirSetupStart = std::chrono::high_resolution_clock::now();
@@ -293,7 +259,6 @@ int main(int argc, char** argv) {
     std::shared_ptr<EmbMatrix> embSharedMatrix, embHint;
     std::shared_ptr<NbrMatrix> nbrSharedMatrix, nbrHint;
 
-    // 尝试从缓存加载 hint
     PIRCache cache;
     if (loadPIRCache(indexPath, cache)) {
         std::cout << "  PIR cache found! Loading from disk..." << std::endl;
@@ -306,7 +271,6 @@ int main(int argc, char** argv) {
         std::cout << "  Neighbor shared: " << nbrSharedMatrix->rows << " x " << nbrSharedMatrix->cols << std::endl;
         std::cout << "  Neighbor hint: " << nbrHint->rows << " x " << nbrHint->cols << std::endl;
 
-        // 仍需 setup server（压缩 DB 用于在线查询）
         std::cout << "  Setting up Embedding PIR server (compressed DB)..." << std::endl;
         server.setupEmbeddingPIR(embSharedMatrix, embHint);
         std::cout << "  Setting up Neighbor PIR server (compressed DB)..." << std::endl;
@@ -314,7 +278,6 @@ int main(int argc, char** argv) {
     } else {
         std::cout << "  No PIR cache found. Computing from scratch..." << std::endl;
 
-        // 生成 shared matrix（对称）
         std::cout << "  Generating embedding shared matrix..." << std::endl;
         embSharedMatrix = PrivateHNSWUtilsV2::generateEmbeddingSharedMatrix(
             server.getEmbeddingPIRParams());
@@ -325,13 +288,11 @@ int main(int argc, char** argv) {
             server.getNeighborPIRParams());
         std::cout << "  Neighbor shared matrix: " << nbrSharedMatrix->rows << " x " << nbrSharedMatrix->cols << std::endl;
 
-        // server setup（对称）
         std::cout << "  Setting up Embedding PIR..." << std::endl;
         embHint = server.setupEmbeddingPIR(embSharedMatrix);
         std::cout << "  Setting up Neighbor PIR..." << std::endl;
         nbrHint = server.setupNeighborPIR(nbrSharedMatrix);
 
-        // 保存到缓存
         std::cout << "  Saving PIR cache to disk..." << std::endl;
         if (savePIRCache(indexPath, embSharedMatrix, embHint, nbrSharedMatrix, nbrHint)) {
             std::cout << "  PIR cache saved successfully." << std::endl;
@@ -343,7 +304,6 @@ int main(int argc, char** argv) {
     auto pirSetupEnd = std::chrono::high_resolution_clock::now();
     double pirSetupTime = std::chrono::duration<double>(pirSetupEnd - pirSetupStart).count();
 
-    // Bandwidth analysis
     uint64_t embHintBytes = embHint->rows * embHint->cols * sizeof(EmbElem);
     uint64_t nbrHintBytes = nbrHint->rows * nbrHint->cols * sizeof(NbrElem);
 
@@ -363,15 +323,10 @@ int main(int argc, char** argv) {
     std::cout << "  PIR setup time: " << std::fixed << std::setprecision(2) << pirSetupTime << " s" << std::endl;
     std::cout << std::endl;
 
-    // ========================================
-    // Step 4: Initialize client (对称接口)
-    // ========================================
     printBoth("[Step 4] Initializing client...\n");
 
     PrivateHNSWClientV2 client;
-    // 应用消融实验开关到 config
     PrivateHNSWConfigV2 clientConfig = server.getConfig();
-    // 只覆盖命令行明确指定的 flag
     if (ablationDisablePrune) clientConfig.disableCentroidPrune = true;
     if (ablationDisableTopCand) clientConfig.topCand = 0;
     if (ablationDisableBatch) clientConfig.disableBatchPIR = true;
@@ -384,16 +339,12 @@ int main(int argc, char** argv) {
     client.initNeighborPIR(
         server.getNeighborPIRParams(), nbrSharedMatrix, nbrHint);
 
-    // 输出消融配置
     if (!ablation.empty()) {
         std::string ablMsg = "  Ablation: " + ablation + "\n";
         printBoth(ablMsg);
     }
     std::cout << std::endl;
 
-    // ========================================
-    // Step 5: Load queries
-    // ========================================
     printBoth("[Step 5] Loading queries...\n");
 
     int queryDim, nq;
@@ -421,8 +372,6 @@ int main(int argc, char** argv) {
 
     std::cout << "  Loaded " << nq << " queries, using " << numQueries << std::endl;
 
-    // 尝试加载 qrels（MS-MARCO MRR 评估）
-    // 从 query 路径提取数据目录
     std::string queryDir = queryPath.substr(0, queryPath.find_last_of("/\\"));
     QrelsData qrelsData = loadQrels(queryDir);
     if (qrelsData.isValid) {
@@ -432,9 +381,6 @@ int main(int argc, char** argv) {
     }
     std::cout << std::endl;
 
-    // ========================================
-    // Step 6: Quantize queries
-    // ========================================
     printBoth("[Step 6] Quantizing queries...\n");
 
     std::vector<std::vector<uint8_t>> quantizedQueries(numQueries);
@@ -445,15 +391,12 @@ int main(int argc, char** argv) {
     }
     std::cout << std::endl;
 
-    // ========================================
-    // Step 7: Perform private search
-    // ========================================
     printBoth("[Step 7] Performing private search on " + std::to_string(numQueries) + " queries...\n");
 
     out << "\n=== Per-Query Statistics ===" << std::endl;
 
     std::vector<int> allRecalls;
-    std::vector<double> allRR;  // Reciprocal Rank for MRR@100
+    std::vector<double> allRR;
     std::vector<int> allPirQueries;
     std::vector<int> allEmbPirQueries;
     std::vector<int> allNbrPirQueries;
@@ -466,13 +409,11 @@ int main(int argc, char** argv) {
     std::vector<double> allSearchTimes;
     std::vector<double> allOnlineTimes;
 
-    // Communication statistics
     std::vector<uint64_t> allEmbQueryBytes;
     std::vector<uint64_t> allEmbAnswerBytes;
     std::vector<uint64_t> allNbrQueryBytes;
     std::vector<uint64_t> allNbrAnswerBytes;
 
-    // Detailed timing accumulator
     PrivateSearchStatsV2 accumulatedStats;
 
     auto searchStart = std::chrono::high_resolution_clock::now();
@@ -483,7 +424,6 @@ int main(int argc, char** argv) {
             quantizedQueries[q].data(), k, ef, server, stats
         );
 
-        // Compute recall against ground truth
         std::set<int> gtSet;
         int gtK = std::min(k, gtDim);
         for (int j = 0; j < gtK; ++j) {
@@ -491,23 +431,20 @@ int main(int argc, char** argv) {
         }
 
         int recall = 0;
-        double rr = 0.0;  // Reciprocal Rank for MRR
+        double rr = 0.0;
         int rank = 0;
 
-        // nodeId = 原始 fvecs 索引 = pid（图未重排序，仍使用原始 ID）
         for (const auto& [nodeId, dist] : results) {
             rank++;
             if (gtSet.count(nodeId)) recall++;
             if (rr == 0.0) {
                 if (qrelsData.isValid && q < (int)qrelsData.indexToQid.size()) {
-                    // Qrels-based MRR: nodeId 即为 pid
                     int qid = qrelsData.indexToQid[q];
                     auto it = qrelsData.qrels.find(qid);
                     if (it != qrelsData.qrels.end() && it->second.count(nodeId)) {
                         rr = 1.0 / rank;
                     }
                 } else {
-                    // NN-based fallback
                     if (gtSet.count(nodeId)) rr = 1.0 / rank;
                 }
             }
@@ -527,13 +464,11 @@ int main(int argc, char** argv) {
         allSearchTimes.push_back(stats.totalSearchTimeMs);
         allOnlineTimes.push_back(stats.onlineTimeMs());
 
-        // Communication statistics
         allEmbQueryBytes.push_back(stats.embQueryBytes);
         allEmbAnswerBytes.push_back(stats.embAnswerBytes);
         allNbrQueryBytes.push_back(stats.nbrQueryBytes);
         allNbrAnswerBytes.push_back(stats.nbrAnswerBytes);
 
-        // Accumulate detailed timing
         accumulatedStats.precomputeHsTimeMs += stats.precomputeHsTimeMs;
         accumulatedStats.upperLayerSearchTimeMs += stats.upperLayerSearchTimeMs;
         accumulatedStats.embQueryGenTimeMs += stats.embQueryGenTimeMs;
@@ -550,7 +485,6 @@ int main(int argc, char** argv) {
         accumulatedStats.neighborPirCount += stats.neighborPirCount;
         accumulatedStats.embCommRounds += stats.embCommRounds;
         accumulatedStats.nbrCommRounds += stats.nbrCommRounds;
-        // Write details for first few queries
         if (q < 10) {
             out << "\nQuery " << q << ":" << std::endl;
             out << "  Total PIR queries: " << stats.pirQueryCount << std::endl;
@@ -569,7 +503,6 @@ int main(int argc, char** argv) {
             out << "  Recall@" << k << ": " << recall << "/" << k << std::endl;
         }
 
-        // Progress output
         if ((q + 1) % 10 == 0 || q == numQueries - 1) {
             std::cout << "\r  Processed " << (q + 1) << "/" << numQueries << " queries" << std::flush;
         }
@@ -579,37 +512,6 @@ int main(int argc, char** argv) {
     auto searchEnd = std::chrono::high_resolution_clock::now();
     double totalTime = std::chrono::duration<double, std::milli>(searchEnd - searchStart).count();
 
-    // // ========================================
-    // // Step 8: Standard search comparison（已注释）
-    // // ========================================
-    // printBoth("\n[Step 8] Running standard search for comparison...\n");
-    // int standardTotalRecall = 0;
-    // double standardTotalRR = 0.0;
-    // auto stdStart = std::chrono::high_resolution_clock::now();
-    // for (int q = 0; q < numQueries; ++q) {
-    //     auto results = index.search(queryFloats.data() + (size_t)q * queryDim, k, ef);
-    //     std::set<int> gtSet;
-    //     for (int j = 0; j < std::min(k, gtDim); ++j) gtSet.insert(gt[q * gtDim + j]);
-    //     int rank = 0; double rr = 0.0;
-    //     for (const auto& [dist, nodeId] : results) {
-    //         rank++;
-    //         if (gtSet.count(nodeId)) standardTotalRecall++;
-    //         if (rr == 0.0) {
-    //             if (qrelsData.isValid && q < (int)qrelsData.indexToQid.size()) {
-    //                 int qid = qrelsData.indexToQid[q];
-    //                 auto it = qrelsData.qrels.find(qid);
-    //                 if (it != qrelsData.qrels.end() && it->second.count(nodeId)) rr = 1.0 / rank;
-    //             } else { if (gtSet.count(nodeId)) rr = 1.0 / rank; }
-    //         }
-    //     }
-    //     standardTotalRR += rr;
-    // }
-    // auto stdEnd = std::chrono::high_resolution_clock::now();
-    // double stdTime = std::chrono::duration<double, std::milli>(stdEnd - stdStart).count();
-
-    // ========================================
-    // Step 9: Summary
-    // ========================================
     int totalRecall = std::accumulate(allRecalls.begin(), allRecalls.end(), 0);
     double avgRecall = 100.0 * totalRecall / (numQueries * k);
     double avgPirQueries = std::accumulate(allPirQueries.begin(), allPirQueries.end(), 0.0) / numQueries;
@@ -631,7 +533,6 @@ int main(int argc, char** argv) {
         : (sortedSearchTimes[numQueries / 2 - 1] + sortedSearchTimes[numQueries / 2]) / 2.0;
     double avgMRR = std::accumulate(allRR.begin(), allRR.end(), 0.0) / numQueries;
 
-    // Communication statistics
     uint64_t totalEmbQuery = std::accumulate(allEmbQueryBytes.begin(), allEmbQueryBytes.end(), 0ULL);
     uint64_t totalEmbAnswer = std::accumulate(allEmbAnswerBytes.begin(), allEmbAnswerBytes.end(), 0ULL);
     uint64_t totalNbrQuery = std::accumulate(allNbrQueryBytes.begin(), allNbrQueryBytes.end(), 0ULL);
@@ -674,9 +575,6 @@ int main(int argc, char** argv) {
     out << "Total search time: " << std::fixed << std::setprecision(2) << totalTime / 1000.0 << " s" << std::endl;
     out << std::endl;
 
-    // ========================================
-    // Communication Statistics
-    // ========================================
     out << "========================================" << std::endl;
     out << "Communication Cost (per ANN query)" << std::endl;
     out << "========================================" << std::endl;
@@ -713,7 +611,6 @@ int main(int argc, char** argv) {
     out << "Total Hint:     " << std::fixed << std::setprecision(2) << (embHintBytes + nbrHintBytes) / 1024.0 / 1024.0 << " MB" << std::endl;
     out << std::endl;
 
-    // Console summary
     std::cout << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << "  Summary (" << numQueries << " queries)" << std::endl;
@@ -739,7 +636,6 @@ int main(int argc, char** argv) {
     std::cout << "  Avg Nbr rounds: " << std::fixed << std::setprecision(1) << (double)accumulatedStats.nbrCommRounds / numQueries << std::endl;
     std::cout << "  Avg total rounds: " << std::fixed << std::setprecision(1) << (double)(accumulatedStats.embCommRounds + accumulatedStats.nbrCommRounds) / numQueries << std::endl;
 
-    // Print detailed timing breakdown (averaged)
     accumulatedStats.precomputeHsTimeMs /= numQueries;
     accumulatedStats.upperLayerSearchTimeMs /= numQueries;
     accumulatedStats.embQueryGenTimeMs /= numQueries;

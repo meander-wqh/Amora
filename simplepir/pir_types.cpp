@@ -77,4 +77,4 @@ std::pair<uint64_t, uint64_t> approxSquareDatabaseDims(uint64_t N, uint64_t rowL
     return {l, m};
 }
 
-} // namespace simplepir
+}

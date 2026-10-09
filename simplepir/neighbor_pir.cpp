@@ -1,8 +1,3 @@
-/**
- * @file neighbor_pir.cpp
- * @brief NeighborPIR 实现 — 隐私查询节点邻居信息
- */
-
 #include "neighbor_pir.h"
 #include "pir_math.h"
 #include <iostream>
@@ -12,24 +7,19 @@
 
 namespace simplepir {
 
-// ============================================================================
-// 无分支 PIR 恢复辅助函数
-// ============================================================================
 namespace {
 
-// 无分支 clamp: 将 val 限制在 [0, maxVal] 范围内
 inline int64_t branchlessClamp(int64_t val, int64_t maxVal) {
     int64_t negMask = val >> 63;
-    val = val & ~negMask;  // val < 0 ? 0 : val
+    val = val & ~negMask;
 
     int64_t diff = maxVal - val;
     int64_t overMask = diff >> 63;
-    val = (val & ~overMask) | (maxVal & overMask);  // val > maxVal ? maxVal : val
+    val = (val & ~overMask) | (maxVal & overMask);
 
     return val;
 }
 
-// 无分支 PIR 结果恢复 (32-bit logQ)
 inline uint64_t branchlessPIRRecover32(
     uint32_t ansVal,
     uint32_t hsVal,
@@ -52,8 +42,6 @@ inline uint64_t branchlessPIRRecover32(
     return static_cast<uint64_t>(branchlessClamp(rounded, signedP - 1));
 }
 
-// 无分支 PIR 结果恢复 (64-bit logQ)
-// logQ=64 时，uint64_t 减法自然模 2^64，cast 到 int64_t 即为有符号差值
 inline uint64_t branchlessPIRRecover64(
     uint64_t ansVal,
     uint64_t hsVal,
@@ -68,7 +56,6 @@ inline uint64_t branchlessPIRRecover64(
     return static_cast<uint64_t>(branchlessClamp(rounded, signedP - 1));
 }
 
-// 模板化的 PIR 恢复（有符号版，用于 EmbeddingPIR）
 template<typename ElemType>
 inline uint64_t recoverSingleValue(
     ElemType ansVal, ElemType hsVal,
@@ -106,32 +93,21 @@ inline uint64_t recoverSingleValue<Elem32>(
                                    halfDelta, signedDelta, signedP);
 }
 
-// ============================================================================
-// 无符号 PIR 恢复（用于 NeighborPIR: 值在 [0, P-1] 范围）
-// 与有符号版的区别: 使用无符号差值 + mod P，不居中到 [-Q/2, Q/2]
-// 这避免了当 v >= P/2 时 v*delta > Q/2 被错误视为负数的问题
-// ============================================================================
 template<typename ElemType>
 inline uint64_t recoverUnsignedValue(
     ElemType ansVal, ElemType hsVal,
     const Params& pirParams
 ) {
-    // 无符号差值: ElemType 减法自然 mod 2^logQ
     ElemType diff = ansVal - hsVal;
     uint64_t delta = pirParams.delta();
     uint64_t P = pirParams.P;
 
-    // 无符号除法 + mod P
     uint64_t diff64 = static_cast<uint64_t>(diff);
     uint64_t rounded = (diff64 + delta / 2) / delta;
     return rounded % P;
 }
 
-} // anonymous namespace
-
-// ============================================================================
-// NeighborPIRConfig
-// ============================================================================
+}
 
 void NeighborPIRConfig::print() const {
     std::cout << "=== Neighbor PIR Configuration ===" << std::endl;
@@ -142,10 +118,6 @@ void NeighborPIRConfig::print() const {
     std::cout << "Total rows (L):         " << totalRows() << std::endl;
     std::cout << "==================================" << std::endl;
 }
-
-// ============================================================================
-// NeighborPIRParams
-// ============================================================================
 
 void NeighborPIRParams::init(const NeighborPIRConfig& cfg,
                               uint64_t logQ, uint64_t lweN, double sigma,
@@ -160,10 +132,6 @@ void NeighborPIRParams::init(const NeighborPIRConfig& cfg,
     pirParams.P = P;
 }
 
-// ============================================================================
-// NeighborDatabaseT
-// ============================================================================
-
 template<typename ElemType>
 NeighborDatabaseT<ElemType>::NeighborDatabaseT(const NeighborPIRConfig& config)
     : config_(config), isInitialized_(false) {
@@ -175,11 +143,10 @@ NeighborDatabaseT<ElemType>::NeighborDatabaseT(const NeighborPIRConfig& config)
     uint64_t rows = config.totalRows();
     uint64_t cols = config.totalSubgroups;
 
-    // Elem32 路径: 直接分配 uint8 存储，用 INVALID_PART(127) 初始化
     if constexpr (sizeof(ElemType) == 4) {
         dbRows_ = rows;
         dbCols_ = cols;
-        compressedData_.resize(rows * cols, 127);  // P-1 = 127
+        compressedData_.resize(rows * cols, 127);
     } else {
         data_ = std::make_shared<MatrixT<ElemType>>(rows, cols);
         for (uint64_t r = 0; r < rows; ++r) {
@@ -243,10 +210,6 @@ void NeighborDatabaseT<ElemType>::printInfo() const {
     std::cout << "==============================" << std::endl;
 }
 
-// ============================================================================
-// NeighborPIRServerT
-// ============================================================================
-
 template<typename ElemType>
 std::shared_ptr<MatrixT<ElemType>> NeighborPIRServerT<ElemType>::setup(
     NeighborDatabaseT<ElemType>& db,
@@ -256,7 +219,6 @@ std::shared_ptr<MatrixT<ElemType>> NeighborPIRServerT<ElemType>::setup(
     params_ = params;
 
     if constexpr (sizeof(ElemType) == 4) {
-        // Elem32 路径: 直接从 Database 的 compressedData_ move 接管
         if (db.hasCompressedData()) {
             compressedDBRows_ = db.getDBRows();
             compressedDBCols_ = db.getDBCols();
@@ -277,7 +239,6 @@ std::shared_ptr<MatrixT<ElemType>> NeighborPIRServerT<ElemType>::setup(
             database_.reset();
         }
 
-        // 计算 hint = DB × A
         hint_ = std::make_shared<MatrixT<ElemType>>(compressedDBRows_, sharedMatrix->cols);
         matMulCompressed8_32(hint_->data.data(), compressedDB_.data(),
                               sharedMatrix->data.data(),
@@ -394,10 +355,6 @@ std::shared_ptr<MatrixT<ElemType>> NeighborPIRServerT<ElemType>::batchAnswer(
     }
 }
 
-// ============================================================================
-// NeighborPIRClientT
-// ============================================================================
-
 template<typename ElemType>
 void NeighborPIRClientT<ElemType>::init(
     const NeighborPIRParams& params,
@@ -424,20 +381,15 @@ NeighborPIRClientT<ElemType>::query(int subgroupColumn) {
     uint64_t M = params_.pirParams.M;
     uint64_t logQ = params_.pirParams.Logq;
 
-    // 生成新的 secret
     auto secret = MatrixT<ElemType>::random(N, 1, logQ, 0);
 
-    // 计算 Hs = H × s
     auto Hs = matrixMulVec(hint_, secret);
 
-    // 计算 As = A × s
     auto queryVec = matrixMulVec(sharedMatrix_, secret);
 
-    // 添加高斯噪声
     auto noise = MatrixT<ElemType>::gaussian(M, 1);
     queryVec->matrixAdd(*noise);
 
-    // 在目标子组列添加 delta
     uint64_t delta = params_.delta();
     uint64_t currentVal = queryVec->get(subgroupColumn, 0);
     queryVec->set(subgroupColumn, 0, currentVal + delta);
@@ -464,16 +416,13 @@ NeighborPIRClientT<ElemType>::query(
 
     uint64_t M = params_.pirParams.M;
 
-    // 复制预计算的 As
     auto queryVec = std::make_shared<MatrixT<ElemType>>(M, 1);
     std::memcpy(queryVec->data.data(), precomputedAs->data.data(),
                 M * sizeof(ElemType));
 
-    // 添加高斯噪声
     auto noise = MatrixT<ElemType>::gaussian(M, 1);
     queryVec->matrixAdd(*noise);
 
-    // 在目标子组列添加 delta
     uint64_t delta = params_.delta();
     uint64_t currentVal = queryVec->get(subgroupColumn, 0);
     queryVec->set(subgroupColumn, 0, currentVal + delta);
@@ -502,13 +451,12 @@ std::vector<uint64_t> NeighborPIRClientT<ElemType>::recoverNodeValues(
 
     int M0 = static_cast<int>(params_.config.maxNeighborsPerNode);
     int nParts = static_cast<int>(params_.config.numParts);
-    int numValues = M0 * nParts;  // 恢复 M0 * numParts 个值
+    int numValues = M0 * nParts;
     int rowStart = localNodeIdx * numValues;
 
     const auto* ansData = answer.answer->data.data();
     const auto* hsData = ctx.Hs->data.data();
 
-    // 边界检查
     size_t ansSize = answer.answer->data.size();
     size_t hsSize = ctx.Hs->data.size();
     int maxRowIdx = rowStart + numValues - 1;
@@ -525,17 +473,12 @@ std::vector<uint64_t> NeighborPIRClientT<ElemType>::recoverNodeValues(
 
     for (int j = 0; j < numValues; ++j) {
         int rowIdx = rowStart + j;
-        // NeighborPIR 使用无符号恢复（值在 [0, P-1] 范围）
         results[j] = recoverUnsignedValue<ElemType>(
             ansData[rowIdx], hsData[rowIdx], params_.pirParams);
     }
 
     return results;
 }
-
-// ============================================================================
-// NeighborPIRT
-// ============================================================================
 
 template<typename ElemType>
 NeighborPIRT<ElemType>::NeighborPIRT(const NeighborPIRConfig& config) : config_(config) {
@@ -561,13 +504,10 @@ void NeighborPIRT<ElemType>::printBandwidth() const {
 
     uint64_t elemBytes = sizeof(ElemType);
 
-    // 离线: Hint H 为 L × N 矩阵
     uint64_t hintBytes = L * N * elemBytes;
 
-    // 在线上传: Query 为 M × 1 向量
     uint64_t queryBytes = M * elemBytes;
 
-    // 在线下载: Answer 为 L × 1 向量
     uint64_t answerBytes = L * elemBytes;
 
     std::cout << "=== Neighbor PIR Bandwidth ===" << std::endl;
@@ -577,10 +517,6 @@ void NeighborPIRT<ElemType>::printBandwidth() const {
     std::cout << "Online download (Answer):  " << std::fixed << std::setprecision(2) << answerBytes / 1024.0 << " KB" << std::endl;
     std::cout << "==============================" << std::endl;
 }
-
-// ============================================================================
-// 显式模板实例化
-// ============================================================================
 
 template struct NbrQueryContextT<Elem32>;
 template struct NbrQueryContextT<Elem64>;
@@ -597,4 +533,4 @@ template class NeighborPIRClientT<Elem64>;
 template class NeighborPIRT<Elem32>;
 template class NeighborPIRT<Elem64>;
 
-} // namespace simplepir
+}
